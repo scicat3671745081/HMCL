@@ -18,10 +18,12 @@
 package org.jackhuang.hmcl.mod.curse;
 
 import com.google.gson.JsonParseException;
+import com.google.gson.reflect.TypeToken;
 import org.jackhuang.hmcl.download.DefaultDependencyManager;
 import org.jackhuang.hmcl.game.DefaultGameRepository;
 import org.jackhuang.hmcl.mod.ModManager;
 import org.jackhuang.hmcl.mod.ModpackCompletionException;
+import org.jackhuang.hmcl.mod.ModpackFile;
 import org.jackhuang.hmcl.mod.RemoteMod;
 import org.jackhuang.hmcl.task.FileDownloadTask;
 import org.jackhuang.hmcl.task.Task;
@@ -33,9 +35,7 @@ import org.jackhuang.hmcl.util.io.FileUtils;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
@@ -53,6 +53,7 @@ public final class CurseCompletionTask extends Task<Void> {
     private final ModManager modManager;
     private final String version;
     private CurseManifest manifest;
+    private Set<? extends ModpackFile> selectedFiles;
     private final List<Task<?>> dependencies = new ArrayList<>();
 
     private final AtomicBoolean allNameKnown = new AtomicBoolean(true);
@@ -66,7 +67,7 @@ public final class CurseCompletionTask extends Task<Void> {
      * @param version           the existent and physical version.
      */
     public CurseCompletionTask(DefaultDependencyManager dependencyManager, String version) {
-        this(dependencyManager, version, null);
+        this(dependencyManager, version, null, null);
     }
 
     /**
@@ -76,18 +77,24 @@ public final class CurseCompletionTask extends Task<Void> {
      * @param version           the existent and physical version.
      * @param manifest          the CurseForgeModpack manifest.
      */
-    public CurseCompletionTask(DefaultDependencyManager dependencyManager, String version, CurseManifest manifest) {
+    public CurseCompletionTask(DefaultDependencyManager dependencyManager, String version, CurseManifest manifest, Set<? extends ModpackFile> selectedFiles) {
         this.dependency = dependencyManager;
         this.repository = dependencyManager.getGameRepository();
         this.modManager = repository.getModManager(version);
         this.version = version;
         this.manifest = manifest;
+        this.selectedFiles = selectedFiles;
 
         if (manifest == null)
             try {
                 File manifestFile = new File(repository.getVersionRoot(version), "manifest.json");
                 if (manifestFile.exists())
                     this.manifest = JsonUtils.GSON.fromJson(FileUtils.readText(manifestFile), CurseManifest.class);
+                File filesFile = new File(repository.getVersionRoot(version), "files.json");
+                if (filesFile.exists()) {
+                    Set<String> files = JsonUtils.GSON.fromJson(FileUtils.readText(filesFile), new TypeToken<HashSet<String>>() {});
+                    this.selectedFiles = this.manifest.getFiles().stream().filter(f -> files.contains(f.getPath())).collect(Collectors.toSet());
+                }
             } catch (Exception e) {
                 Logging.LOG.log(Level.WARNING, "Unable to read CurseForge modpack manifest.json", e);
             }
@@ -136,10 +143,14 @@ public final class CurseCompletionTask extends Task<Void> {
                             }
                         })
                         .collect(Collectors.toList()));
+
         FileUtils.writeText(new File(root, "manifest.json"), JsonUtils.GSON.toJson(newManifest));
+        FileUtils.writeText(new File(root, "files.json"), JsonUtils.GSON.toJson(selectedFiles.stream().map(ModpackFile::getPath).collect(Collectors.toList())));
 
         File resourcePacks = new File(repository.getVersionRoot(modManager.getVersion()), "resourcepacks");
-        for (CurseManifestFile file : newManifest.getFiles())
+        for (CurseManifestFile file : newManifest.getFiles()) {
+            if (selectedFiles != null && !selectedFiles.contains(file))
+                continue; // Not selected
             if (StringUtils.isNotBlank(file.getFileName())) {
                 RemoteMod mod = CurseForgeRemoteModRepository.MODS.getModById(Integer.toString(file.getProjectID()));
                 File target;
@@ -160,6 +171,7 @@ public final class CurseCompletionTask extends Task<Void> {
                 task.setCaching(true);
                 dependencies.add(task.withCounter("hmcl.modpack.download"));
             }
+        }
 
         if (!dependencies.isEmpty()) {
             getProperties().put("total", dependencies.size());

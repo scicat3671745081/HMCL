@@ -25,6 +25,8 @@ import org.jackhuang.hmcl.game.HMCLGameRepository;
 import org.jackhuang.hmcl.game.ManuallyCreatedModpackException;
 import org.jackhuang.hmcl.game.ModpackHelper;
 import org.jackhuang.hmcl.mod.Modpack;
+import org.jackhuang.hmcl.mod.ModpackFile;
+import org.jackhuang.hmcl.mod.ModpackManifest;
 import org.jackhuang.hmcl.setting.Profile;
 import org.jackhuang.hmcl.setting.Profiles;
 import org.jackhuang.hmcl.task.Schedulers;
@@ -40,6 +42,8 @@ import org.jackhuang.hmcl.util.io.FileUtils;
 
 import java.io.File;
 import java.nio.charset.Charset;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.logging.Level;
@@ -101,9 +105,9 @@ public final class LocalModpackPage extends ModpackPage {
                 .thenApplyAsync(encoding -> {
                     charset = encoding;
                     manifest = ModpackHelper.readModpackManifest(selectedFile.toPath(), encoding);
+                    pendingOptionalFiles(manifest);
                     return manifest;
-                })
-                .whenComplete(Schedulers.javafx(), (manifest, exception) -> {
+                }).whenComplete(Schedulers.javafx(), (_unused, exception) -> {
                     if (exception instanceof ManuallyCreatedModpackException) {
                         hideSpinner();
                         lblName.setText(selectedFile.getName());
@@ -141,6 +145,25 @@ public final class LocalModpackPage extends ModpackPage {
                 }).start();
     }
 
+    private void pendingOptionalFiles(Modpack manifest) {
+        waitingForOptionalFiles.set(true);
+        if (!(manifest.getManifest() instanceof ModpackManifest.SupportOptional)) {
+            optionalFiles.setOptionalFileList(Collections.emptyList());
+            return;
+        }
+        optionalFiles.setPending();
+        Task.supplyAsync(() -> manifest.setManifest(manifest.getManifest().getProvider().loadFiles(manifest.getManifest())))
+                .whenComplete(Schedulers.javafx(), (manifest1, exception) -> {
+                    List<? extends ModpackFile> files = ((ModpackManifest.SupportOptional) manifest1.getManifest()).getFiles();
+                    optionalFiles.setOptionalFileList(files);
+                    waitingForOptionalFiles.set(false);
+                    if (exception != null || files.stream().anyMatch(s -> s.isOptional() && (s.getMod() == null || s.getFileName() == null))) {
+                        LOG.log(Level.WARNING, "Failed to load optional files", exception);
+                        optionalFiles.setRetry(() -> pendingOptionalFiles(manifest));
+                    }
+                }).start();
+    }
+
     @Override
     public void cleanup(Map<String, Object> settings) {
         settings.remove(MODPACK_FILE);
@@ -150,6 +173,7 @@ public final class LocalModpackPage extends ModpackPage {
         if (!txtModpackName.validate()) return;
         controller.getSettings().put(MODPACK_NAME, txtModpackName.getText());
         controller.getSettings().put(MODPACK_CHARSET, charset);
+        controller.getSettings().put(MODPACK_SELECTED_FILES, optionalFiles.getSelected());
         controller.onFinish();
     }
 
@@ -164,4 +188,6 @@ public final class LocalModpackPage extends ModpackPage {
     public static final String MODPACK_MANIFEST = "MODPACK_MANIFEST";
     public static final String MODPACK_CHARSET = "MODPACK_CHARSET";
     public static final String MODPACK_MANUALLY_CREATED = "MODPACK_MANUALLY_CREATED";
+
+    public static final String MODPACK_SELECTED_FILES = "MODPACK_SELECTED_FILES";
 }
