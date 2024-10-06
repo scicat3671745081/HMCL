@@ -294,7 +294,7 @@ public final class Logger {
         ByteArrayBuilder output = new ByteArrayBuilder();
         try {
             exportLogs(output);
-            return output.toString();
+            return output.toUTF8String();
         } catch (IOException e) {
             log(Level.WARNING, CLASS_NAME + ".getLogs", "Failed to export logs", e);
             return "";

@@ -48,7 +48,7 @@ public final class IOUtils {
     }
 
     public static String readFullyAsStringWithoutClosing(InputStream stream) throws IOException {
-        return readFullyWithoutClosing(stream).toString();
+        return readFullyWithoutClosing(stream).toUTF8String();
     }
 
     /**
@@ -71,7 +71,7 @@ public final class IOUtils {
     }
 
     public static String readFullyAsString(InputStream stream) throws IOException {
-        return readFully(stream).toString();
+        return readFully(stream).toUTF8String();
     }
 
     public static void copyTo(InputStream src, OutputStream dest) throws IOException {
