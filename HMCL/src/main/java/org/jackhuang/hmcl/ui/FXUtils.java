@@ -26,7 +26,6 @@ import javafx.beans.WeakInvalidationListener;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.Property;
 import javafx.beans.value.*;
-import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Cursor;
 import javafx.scene.Node;
@@ -81,6 +80,7 @@ import java.nio.file.Paths;
 import java.util.List;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -134,6 +134,26 @@ public final class FXUtils {
             runnable.run();
         } else {
             Platform.runLater(runnable);
+        }
+    }
+
+    public static void runInFXAndWait(Runnable runnable) {
+        if (Platform.isFxApplicationThread()) {
+            runnable.run();
+            return;
+        }
+        final CountDownLatch doneLatch = new CountDownLatch(1);
+        Platform.runLater(() -> {
+            try {
+                runnable.run();
+            } finally {
+                doneLatch.countDown();
+            }
+        });
+        try {
+            doneLatch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -226,20 +246,6 @@ public final class FXUtils {
                     info.unbind();
                     node.getProperties().remove(key);
                 });
-    }
-
-    public static <K, T> void setupCellValueFactory(JFXTreeTableColumn<K, T> column, Function<K, ObservableValue<T>> mapper) {
-        column.setCellValueFactory(param -> {
-            if (column.validateValue(param))
-                return mapper.apply(param.getValue().getValue());
-            else
-                return column.getComputedValue(param);
-        });
-    }
-
-    public static Node wrapMargin(Node node, Insets insets) {
-        StackPane.setMargin(node, insets);
-        return new StackPane(node);
     }
 
     public static void setValidateWhileTextChanged(Node field, boolean validate) {
